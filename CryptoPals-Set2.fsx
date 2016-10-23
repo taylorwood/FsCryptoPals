@@ -19,6 +19,7 @@ let cryptAlg key =
     let aes = new AesManaged()
     aes.Mode <- CipherMode.ECB
     aes.Key <- key
+    aes.Padding <- PaddingMode.None
     aes
 
 let blockSize = 16
@@ -98,7 +99,7 @@ module ECBOracle =
     let rndKey = genAesKey ()
     let crazyEcbCrypt bytes =
         encrypt (Array.append bytes append) rndKey
-let growingKeys = [for i in 1 .. 20 do yield String.replicate i "A"] |> List.map stringToBytes
+let growingKeys = [for i in 1 .. 10 do yield Array.create i 0uy]
 let lenDiffs = // look for ciphertext size diffs given diff inputs
     growingKeys
     |> List.map (ECBOracle.crazyEcbCrypt >> Array.length)
@@ -106,27 +107,27 @@ let lenDiffs = // look for ciphertext size diffs given diff inputs
     |> List.map (fun (x,y) -> abs(x-y))
     |> List.where (fun x -> x > 0)
     |> List.distinct
+    
 isECB ECBOracle.crazyEcbCrypt
-let shorty = Array.create (blockSize-1) (byte 'A')
+
 let numBlocks = (ECBOracle.crazyEcbCrypt [||] |> Array.length) / blockSize
 
 let secret = ResizeArray()
 for blockNum in 0 .. numBlocks - 1 do
-    for i in 0 .. blockSize - 1 do
-        let getBlock (buffer: byte[]) blockNum =
+    for blockOffset in 0 .. blockSize - 1 do
+        let getBlock blockNum (buffer: byte[]) =
             buffer |> Array.chunkBySize blockSize |> Array.tryItem blockNum
-        let shorty = Array.create (blockSize - (i + 1)) (byte 'A')
-        let shortyCrypt = ECBOracle.crazyEcbCrypt shorty
-        let bruteCrypts = [
+        let shorty = Array.create (blockSize - (blockOffset + 1)) 0uy
+        let bruteCryptBlocks = seq {
             for b in Byte.MinValue .. Byte.MaxValue do
                 let plaintext = Array.concat [| shorty; secret.ToArray(); [|b|] |]
                 let crypted = ECBOracle.crazyEcbCrypt plaintext
-                yield b, crypted ]
-        let blockMatch =
-            bruteCrypts
-            |> List.tryFind (fun (_,cipher) ->
-                getBlock cipher blockNum = getBlock shortyCrypt blockNum)
-        match blockMatch with
-        | Some (byte,_) -> secret.Add byte
-        | None -> ()
+                yield b, getBlock blockNum crypted }
+        let shortyCryptBlock = shorty |> ECBOracle.crazyEcbCrypt |> getBlock blockNum
+        bruteCryptBlocks
+        |> Seq.tryPick (fun (guessByte, cipherBlock) ->
+            if cipherBlock = shortyCryptBlock
+            then Some guessByte
+            else None)
+        |> Option.iter (secret.Add)
 secret.ToArray() |> bytesToString |> printfn "%A"
