@@ -43,3 +43,14 @@ let rec cartesian lstlst =
     | _ -> []
 
 let readBase64Bytes filePath = IO.File.ReadAllLines(filePath) |> String.concat "" |> Convert.FromBase64String
+
+let indexOfCoincidence (input: string) =
+    let sum =
+        input
+        |> Seq.where Char.IsLetter
+        |> Seq.map Char.ToLowerInvariant
+        |> Seq.countBy id
+        |> Seq.sumBy (fun (ch,count) -> count * (count - 1))
+        |> float
+    let n = input.Length |> float
+    sum / (n * (n-1.))
